@@ -1,5 +1,4 @@
 package Finance::Bank::DE::DeutscheBank;
-
 use strict;
 use warnings;
 use Carp;
@@ -8,10 +7,11 @@ use base 'Class::Accessor';
 use WWW::Mechanize;
 use HTML::LinkExtractor;
 use HTML::TreeBuilder;
+use Text::CSV_XS;
 
 use vars qw[ $VERSION ];
 
-$VERSION = '0.01';
+$VERSION = '0.02';
 
 BEGIN	{
 		Finance::Bank::DE::DeutscheBank->mk_accessors(qw( agent ));
@@ -19,7 +19,7 @@ BEGIN	{
 
 use constant BASEURL	=> 'https://meine.deutsche-bank.de';
 use constant LOGIN	=> BASEURL . '/mod/WebObjects/dbpbc.woa';
-use constant FUNCTIONS	=> "(Daueraufträge)|(Direkteinstieg)|(Ihr Konto)|(Inlands-Überweisung)|(Kontakt & Service)|(Kontoübersicht)|(Sicherheit)|(Überweisungsvorlagen)";
+use constant FUNCTIONS	=> "(Übersicht)|(Ihr Konto)|(Ihr Depot)|(Service / Optionen)|(Umsatzanzeige)|(Inlands-Überweisung)|(Daueraufträge)|(Lastschrift)|(Kunden-Logout)|(Überweisungsvorlagen)(Ihre Finanzübersicht als PDF-Datei speichern)|(Ihre Finanzübersicht als CSV-Datei speichern)";
 
 sub new
 {
@@ -80,7 +80,7 @@ sub new_session
 
 	if ( $result != 200 )
 	{
-		$self->log("Status","Banking is unavailable");
+		$self->log("Status"," Banking is unavailable");
 		die "Banking is unavailable";
 	}
 
@@ -107,26 +107,26 @@ sub new_session
 		$agent->current_form->value('platform', 'Linux');
 
 		# VALIDATION_TRIGGER_1 is used to trigger 'LOGIN'
-		$result = $agent->click('VALIDATION_TRIGGER_1', 27, 7 );
+		$result = $agent->click('VALIDATION_TRIGGER_1' );
 
-		# get navigator frame ( extract link )
-		my $navigator = $agent->find_link( 'name' => 'navigator' );
-
-		# first we have to get the content frame ! other way around won't work !!
-		$agent->follow_link( 'name' => 'content' );
-
-		# then we can get navigator frame content
-		$agent->get( BASEURL . $navigator->[0] );
-		$^W=1;
+		if ( $self->access_denied )
+		{
+			$self->log("Not possible to authenticate at bank server ( wrong account/pin combination ? )");
+			return 0;
+		}
 
 		# extract links to account functions
 		my $LinkExtractor = new HTML::LinkExtractor();
+
 		$LinkExtractor->strip( 1 );
 		$LinkExtractor->parse(\$agent->content());
 
+		# needed here because of empty links ( href attribute )
+		$^W=1;
+
 		# now we have the links in the format
 		#	{
-		#		'_TEXT' => 'Kontoübersicht',
+		#		'_TEXT' => 'Übersicht',
 		#		'target' => '_top',
 		#		'href' => '/mod/WebObjects/dbpbc.woa/618/wo/HpRl1hqezkxfYRosJRjTg0/4.11.1.5.3.3.5.3',
 		#		'tag' => 'a',
@@ -139,7 +139,7 @@ sub new_session
 
 		# but I would like to have them as
 		# 	{
-		# 		'_TEXT' => 'Kontoübersicht',
+		# 		'_TEXT' => 'Übersicht',
 		# 		'href' => '/mod/WebObjects/dbpbc.woa/618/wo/HpRl1hqezkxfYRosJRjTg0/4.11.1.5.3.3.5.3',
 		# 	},
 		# 	{	...
@@ -156,13 +156,33 @@ sub new_session
 					if ( $_ !~ m/(_TEXT)|(href)/ )
 					{
 						delete $elem->{ $_ };
-					}
+					} 
 				}
 
-				push @tmp, \%$elem;
+				# get all but broken links
+				if ( $elem->{ '_TEXT' } !~ m/Ihre Finanzübersicht als [CP][SD][VF]-Datei speichern/ )
+				{
+					push @tmp, \%$elem;
+				}
 			}
 		}
 
+		# get links for additional functions / broken links ( onclick )
+		my $navigator =  $agent->find_link( text_regex => qr/Ihre Finanzübersicht als PDF-Datei speichern/ );
+		$navigator->[5]{ 'onclick' } =~ s!^[^/]+/!/!;
+		$navigator->[5]{ 'onclick' } =~ s!';.*;!!;
+		push @tmp, {	'_TEXT'	=> 'Ihre Finanzübersicht als PDF-Datei speichern',
+				'href'	=> $navigator->[5]{ 'onclick' }
+			   };
+
+		$navigator =  $agent->find_link( text_regex => qr/Ihre Finanzübersicht als CSV-Datei speichern/ );
+		$navigator->[5]{ 'onclick' } =~ s!^[^/]+/!/!;
+		$navigator->[5]{ 'onclick' } =~ s!';.*;!!;
+		push @tmp, {	'_TEXT'	=> 'Ihre Finanzübersicht als CSV-Datei speichern',
+				'href'	=> $navigator->[5]{ 'onclick' }
+			   };
+
+		# save these links so that we can remember them
 		$self->{navigation} = \@tmp;
 		$self->log_httpresult();
 		$result = $agent->status;
@@ -187,13 +207,13 @@ sub get_login_page
 sub error_page {
   # Check if an error page is shown (a page with much red on it)
   my ($self) = @_;
-  $self->agent->content =~ /<tr valign="top" bgcolor="#FF0033">/sm;
+  $self->agent->content =~ /<tr valign="top" bgcolor="#FF0033">/sm || $self->agent->content =~ /<div class="errorMsg">/ || $self->agent->content =~ /<div class="backendErrorMsg">/ ;
 };
 
 sub maintenance
 {
 	my ($self) = @_;
-	$self->error_page and
+	$self->error_page or
 	$self->agent->content =~ /derzeit steht das Internet Banking aufgrund von Wartungsarbeiten leider nicht zur Verf&uuml;gung.\s*<br>\s*In K&uuml;rze wird das Internet Banking wieder wie gewohnt erreichbar sein./gsm;
 };
 
@@ -201,10 +221,12 @@ sub access_denied {
   my ($self) = @_;
   my $content = $self->agent->content;
 
-  $self->error_page and
+  $self->error_page or
   (  $content =~ /Die eingegebene Kontonummer ist unvollst&auml;ndig oder falsch\..*\(2051\)/gsm
   or $content =~ /Die eingegebene PIN ist falsch\. Bitte geben Sie die richtige PIN ein\.\s*\(10011\)/gsm
-  or $content =~ /Die von Ihnen eingegebene Kontonummer ist ung&uuml;ltig und entspricht keiner Deutsche Bank-Kontonummer.\s*\(3040\)/gsm );
+  or $content =~ /Die von Ihnen eingegebene Kontonummer ist ung&uuml;ltig und entspricht keiner Deutsche Bank-Kontonummer.\s*\(3040\)/gsm
+  or $content =~ /Leider konnte Ihre Anmeldung nicht erfolgreich durchgef&uuml;hrt werden/
+  or $content =~ /Bitte geben Sie ein g&uuml;ltiges Datum ein/ );
 };
 
 sub session_timed_out {
@@ -261,8 +283,10 @@ sub close_session
 	if (not $self->access_denied)
 	{
 		$self->log("Closing session");
-		$self->select_function('quit');
-		$result = $self->agent->res->as_string =~ /Online-Banking\s+beendet/sm;
+		$^W=0;
+		$self->select_function('Kunden-Logout');
+		$^W=1;
+		$result = $self->agent->res->as_string =~ /https:\/\/wob.deutsche-bank.de\/trxm\/logout\/pbc\/logout_pbc.html/;
 	}
 	else
 	{
@@ -277,18 +301,15 @@ sub login
 {
 	my ($self) = @_;
 
-	$self->new_session();
-
-	my $agent = $self->agent();
-
-	if ( $agent->status == 200 )
+	if ( $self->new_session() )
 	{
 		return 1;
 	}
 	else
 	{
-		return 0;
-	};
+		return 0; 
+	}
+
 };
 
 
@@ -296,41 +317,37 @@ sub parse_account_overview
 {
 	my ($self) = @_;
 	my $agent = $self->agent();
-	my @saldo = ();
-	my $count = 0;
+	my %saldo = ();
 
 	my $tree = HTML::TreeBuilder->new();
 	$tree->parse( $agent->content() );
 
-	my @Entries =();
-	foreach my $row ( $tree->find_by_tag_name('tr') )
+	foreach my $table ( $tree->look_down('_tag', 'table') )
 	{
-		$count += 1;
-		@Entries =();
-		foreach my $child ( $row->content_list() )
+		foreach my $row ( $table->look_down('_tag', 'tr') )
 		{
-			if ( ref $child and $child->tag eq 'td' )
+			foreach my $child ( $row->look_down('_tag', 'td') )
 			{
-				my $tmp = $child->as_text;
-				$tmp =~ s/^[ 	]*//g;
-				$tmp =~ s/[ 	]*$//g;
-				$tmp =~ s/\240//g;
-				push( @Entries, ( $tmp ) );
+				if (( defined $child->attr('class')) && (( $child->attr('class') eq 'total balance')||($child->attr('class') eq 'total currency')))
+				{
+					my $tmp = $child->as_trimmed_text;
+					$tmp =~ s/^[ 	]*//g;
+					$tmp =~ s/[ 	]*$//g;
+					$tmp =~ s/\240//g;
+
+					if ( $child->attr('class') eq 'total balance')
+					{
+						$saldo{ 'Saldo' }  = $tmp;
+					}
+					elsif ($child->attr('class') eq 'total currency')
+					{
+						$saldo{ 'Währung' } = $tmp;
+					}
+				}
 			}
 		}
-		if (( $count == 4 ) || ( $count == 5) )
-		{
-			push( @saldo, @Entries );
-		}
-	}
+	} 
 
-	$count = @saldo;
-
-	my %saldo = ();
-	for ( my $i = 1; $i <= ($count/2); $i++ )
-	{
-		$saldo{ $saldo[ $i - 1 ] } = $saldo[ $count/2-1 + $i ];
-	}
 	return %saldo
 }
 
@@ -343,8 +360,7 @@ sub saldo
 	if ($agent)
 	{
 		$^W=0;
-		$self->select_function('Kontoübersicht');
-		$agent->follow_link( 'name' => 'content' );
+		$self->select_function('Übersicht');
 		$^W=1;
 
 		return $self->parse_account_overview();
@@ -361,39 +377,31 @@ sub account_statement
 
 	my $count = 0;
 	my @header = ();
-	my @Entries = ();
 	my @AccountStatement = ();
 	my $AccountRow = ();
-
 	my @date;
 	my $agent = $self->agent;
 	if ($agent)
 	{
 		$^W=0;
-		$self->select_function('Kontoübersicht');
-		$agent->follow_link( 'name' => 'content' );
+		$self->select_function('Übersicht');
 
 		my %account = $self->parse_account_overview();
-		$agent->follow_link( 'text' => $account{ 'Bezeichnung' } );
+		$agent->follow_link( 'text' => 'Umsatzanzeige' );
 		$^W=1;
 
 		my $tree = HTML::TreeBuilder->new();
 
 		$tree->parse( $agent->content );
 
-		foreach my $inputelem ( $tree->look_down('_tag', 'input') )
-		{
-			if ( $inputelem->attr('type') eq 'text' )
-			{
-				# text elem 1 - 6 are needed to enter from/till date
-				push @date, $inputelem->attr('name');
-			}
-		}
+		my $LinkFixed = ();
 
-		my $sort = ();
 		foreach my $selectelem ( $tree->look_down('_tag', 'select') )
 		{
-			$sort = $selectelem->attr('name');
+			if (( defined $selectelem->attr('onchange') ) && ( $selectelem->attr('onchange') eq 'document.calForm.time[1].click();' ))
+			{
+				$LinkFixed = $selectelem->attr('name');
+			}
 		}
 
 		# should I get account statement for user defined period ?
@@ -408,10 +416,10 @@ sub account_statement
 			croak "Year must have 4 digits in StartDate"
 				unless ( length $year == 4 );
 
-			$agent->current_form->value('time','period');
-			$agent->current_form->value( $date[0], $day );
-			$agent->current_form->value( $date[1], $month );
-			$agent->current_form->value( $date[2], $year );
+			$agent->current_form->value( 'time','period');
+			$agent->current_form->value( 'fromDatecal_0', $day );
+			$agent->current_form->value( 'fromDatecal_1', $month );
+			$agent->current_form->value( 'fromDatecal_2', $year );
 
 			( $day, $month, $year ) = split( '\.', $parameter{ 'EndDate' } );
 			$day	= sprintf("%02d", $day );
@@ -421,64 +429,94 @@ sub account_statement
 			croak "Year must have 4 digits in EndDate"
 				unless ( length $year == 4 );
 
-			$agent->current_form->value('time','period');
-			$agent->current_form->value( $date[3], $day );
-			$agent->current_form->value( $date[4], $month );
-			$agent->current_form->value( $date[5], $year );
+			$agent->current_form->value( 'time','period');
+			$agent->current_form->value( 'toDatecal_0', $day );
+			$agent->current_form->value( 'toDatecal_1', $month );
+			$agent->current_form->value( 'toDatecal_2', $year );
 		}
-		else
+		elsif ( defined $parameter{ 'last' } )
 		{
-			# this is the default ( statements since last login
-			$agent->current_form->value('time','lastLogin');
+			my $last = ();
+			$agent->current_form->value('time','fixed');
+			if ( $parameter{ 'last' } <= 10 )
+			{
+				$last = 0;
+			}
+			elsif ( $parameter{ 'last' } <= 20 )
+			{
+				$last = 1;
+			}
+			elsif ( $parameter{ 'last' } <= 30 )
+			{
+				$last = 2;
+			}
+			elsif ( $parameter{ 'last' } <= 60 )
+			{
+				$last = 3;
+			}
+			elsif ( $parameter{ 'last' } <= 90 )
+			{
+				$last = 4;
+			}
+			else	# > 90
+			{
+				$last = 5;
+			}
+			$agent->current_form->value($LinkFixed, $last);
+		}
+		else	#expect that per default last login date is set ...
+		{
+			;
 		}
 
 		$^W=0;
-		# VALIDATION_TRIGGER_1 is used to trigger 'LOGIN'
-		my $result = $agent->click('VALIDATION_TRIGGER1' );
+		# VALIDATION_TRIGGER_1 is used to trigger update of account balance
+		my $result = $agent->click('VALIDATION_TRIGGER1' ); 
 
-		# first we have to get the content frame ! other way around won't work !!
-		$agent->follow_link( 'name' => 'content' );
+		# VALIDATION_TRIGGER_5 is used to get CSV formated data of account balance
+		$result = $agent->click('VALIDATION_TRIGGER_5' ); 
 		$^W=1;
 
-		$tree = HTML::TreeBuilder->new();
-		$tree->parse( $agent->content() );
-
-		foreach my $table ( $tree->look_down('_tag', 'table') )
+		#successfully downloaded account balance data in csv format
+		if ( $result->is_success )
 		{
-			foreach my $row ( $table->look_down('_tag', 'tr') )
+			my @balance = split( '\n', $result->content );
+			my $csv = Text::CSV_XS->new( { 'sep_char'    => ';' });
+
+			my $StartLineDetected = 0;
+			for ( my $loop = 0; $loop < scalar @balance; $loop++ )
 			{
-				@Entries =();
-				foreach my $child ( $row->look_down('_tag', 'td') )
+				my $line = $balance[ $loop ];
+				chomp( $line );
+
+				if ( $StartLineDetected == 1 )
 				{
-					if (( defined $child->attr('class')) && ( $child->attr('class') eq 'tablehead' ))
+					my $status = $csv->parse( $line );
+					@header = $csv->fields();
+					$AccountRow = 0;
+					@AccountStatement = ();
+					$StartLineDetected = 2;
+				}
+				elsif ( $StartLineDetected == 2 )
+				{
+					if ( $line !~ /^Kontostand "/ )
 					{
-						my $tmp = $child->as_trimmed_text;
-						$tmp =~ s/^[ 	]*//g;
-						$tmp =~ s/[ 	]*$//g;
-						$tmp =~ s/\240//g;
-						push( @header, ( $tmp ) );
-						$count += 1;
-					}
-					elsif ( $child->as_trimmed_text =~ 'Kontostand' )
-					{
-						$count = 0;
-					}
-					elsif ( $count >= 6 )
-					{
-						$count += 1;
-						$AccountRow = ($count -1)/ 6;
-						$AccountRow = sprintf( "%d", $AccountRow );
+						my $status = $csv->parse( $line );
+						my @columns = $csv->fields();
 
-						my $tmp = $child->as_trimmed_text;
-						$tmp =~ s/^[ 	]*//g;
-						$tmp =~ s/[ 	]*$//g;
-						$tmp =~ s/\240//g;
-						$AccountStatement[ $AccountRow - 1 ]{ $header[ ($count - 1) % 6 ] } = $tmp;
+						for (my $loop = 0; $loop < scalar @columns; $loop++ ) 
+						{ 
+							$AccountStatement[ $AccountRow ]{ $header[ $loop ] } = $columns[ $loop ];
+						}
+						$AccountRow++; 
 					}
-
+				}
+				elsif ( $line =~ /Vorgemerkte und noch nicht gebuchte Umsätze sind nicht Bestandteil dieser Aufstellung/ )
+				{
+					$StartLineDetected = 1;
 				}
 			}
-		}
+		} 
 		return @AccountStatement;
 	}
 	else
@@ -497,13 +535,13 @@ sub transfer
 	my @Entries = ();
 	my @AccountStatement = ();
 	my $AccountRow = ();
+	my %SingleRemittance = ();
 
 	my $agent = $self->agent;
 	if ($agent)
 	{
 		$^W=0;
 		$self->select_function('Inlands-Überweisung');
-		$agent->follow_link( 'name' => 'content' );
 		$^W=1;
 
 		croak "Receiver name must be defined"
@@ -533,39 +571,62 @@ sub transfer
 		croak "Usage1 (Vermerk) must be defined"
 			unless ( defined $parameter{ 'Usage1' } );
 
-		croak "Usage1 (Vermerk) must not exceed 27 characters"
-			unless (( length $parameter{ 'Usage1' } <= 27 )&&( length $parameter{ 'Usage1' } >= 1 ));
-
 		$parameter{ 'Usage2' } = $parameter{ 'Usage2' } || "";
 		$parameter{ 'Usage3' } = $parameter{ 'Usage3' } || "";
 		$parameter{ 'Usage4' } = $parameter{ 'Usage4' } || "";
 
-		croak "Usage2 (Vermerk) must not exceed 27 characters"
-			unless ( length $parameter{ 'Usage2' } <= 27 );
+		$parameter{ 'Usage1' } .= " " . $parameter{ 'Usage2' };
+		$parameter{ 'Usage1' } .= " " . $parameter{ 'Usage3' };
+		$parameter{ 'Usage1' } .= " " . $parameter{ 'Usage4' };
 
-		croak "Usage3 (Vermerk) must not exceed 27 characters"
-			unless ( length $parameter{ 'Usage3' } <= 27 );
+		croak "Usage (Vermerk) must not exceed 108 characters"
+			unless (( length $parameter{ 'Usage1' } <= 108 )&&( length $parameter{ 'Usage1' } >= 1 ));
+		
+		my $tree = HTML::TreeBuilder->new();
+		$tree->parse( $agent->content() );
+		foreach my $inputelem ( $tree->look_down('_tag', 'input') )
+		{
+			if (( defined $inputelem->attr('class') ) && ( $inputelem->attr('class') =~ m/(^calDD$)|(^calMM$)|(^calYYYY$)/ ))
+			{
+				$SingleRemittance{ $inputelem->attr('class') } = $inputelem->attr('name');
+			}
+		}
 
-		croak "Usage4 (Vermerk) must not exceed 27 characters"
-			unless ( length $parameter{ 'Usage4' } <= 27 );
+		# check if this remittance should be executed on a specific date
+		if ( defined $parameter{ 'Date' } )
+		{
+			my ( $day, $month, $year ) = split( '\.', $parameter{ 'Date' } );
+			$day	= sprintf("%02d", $day );
+			$month	= sprintf("%02d", $month );
+			$year	= sprintf("%04d", $year );
+
+			croak "Year must have 4 digits in Date"
+				unless ( length $year == 4 );
+
+			$agent->current_form->value( $SingleRemittance{  'calDD'  }, $day );
+			$agent->current_form->value( $SingleRemittance{  'calMM'  }, $month );
+			$agent->current_form->value( $SingleRemittance{ 'calYYYY' }, $year );
+		}
+		else
+		{
+			# no specific date; do it as soon as possible
+			;
+		}
 
 
 		$agent->current_form->value('Receiver',		$parameter{ 'Receiver' });
 		$agent->current_form->value('RecAccount',	$parameter{ 'RecAccount' });
 		$agent->current_form->value('RecBLZ',		$parameter{ 'RecBLZ' });
 		$agent->current_form->value('Amount',		$parameter{ 'Amount' });
-		$agent->current_form->value('Usage1',		$parameter{ 'Usage1' });
-		$agent->current_form->value('Usage2',		$parameter{ 'Usage2' });
-		$agent->current_form->value('Usage3',		$parameter{ 'Usage3' });
-		$agent->current_form->value('Usage4',		$parameter{ 'Usage4' });
+		$agent->current_form->value('Usage',		$parameter{ 'Usage1' });
 
 		$^W=0;
 		# VALIDATION_TRIGGER is used to trigger 'transfer'
-		my $result = $agent->click('VALIDATION_TRIGGER' );
-
-		# first we have to get the content frame ! other way around won't work !!
-		$agent->follow_link( 'name' => 'content' );
+		my $result = $agent->click('VALIDATION_TRIGGER' ); 
 		$^W=1;
+
+		croak "An error occured during submitting data"
+			unless ( ! $self->error_page );
 
 		croak "Tan must be defined"
 			unless ( defined $parameter{ 'Tan' } );
@@ -573,17 +634,22 @@ sub transfer
 		croak "Tan must have 6 digits"
 			unless ( length $parameter{ 'Tan' } == 6 );
 
-		$agent->current_form->value('Tan',		$parameter{ 'Tan' });
+		$agent->current_form->value('mCk',		$parameter{ 'Tan' });
 
 		$^W=0;
 		# VALIDATION_TRIGGER is used to trigger 'transfer'
-		$result = $agent->click('VALIDATION_TRIGGER' );
-
-		# first we have to get the content frame ! other way around won't work !!
-		$agent->follow_link( 'name' => 'content' );
+		$result = $agent->click('VALIDATION_TRIGGER_1' ); 
 		$^W=1;
 
-		return 1;
+		if ( $self->error_page )
+		{ 
+			carp "an error occured during tan submision";
+			return 0;
+		}
+		else
+		{
+			return 1;
+		}
 	}
 	else
 	{
@@ -634,8 +700,8 @@ Finance::Bank::DE::DeutscheBank - Checks your Deutsche Bank account from Perl
   # get account statement
   my %parameter = (
                         period => 1,
-                        StartDate => "10.10.2003",
-                        EndDate => "29.11.2003",
+                        StartDate => "01.01.2005",
+                        EndDate => "02.02.2005",
                   );
 
   my @account_statement = $account->account_statement(%parameter);
@@ -712,7 +778,7 @@ content of the current page from there.
 
 =head2 select_function( STRING )
 
-Selects a function. The three currently supported functions are C<Inlands-Überweisung>, C<Kontoübersicht> and C<quit>.
+Selects a function. The three currently supported functions are C<Inlands-Überweisung>, C<Übersicht> and C<Kunden-Logout>.
 Which means transfer, account statement and quit.
 
 =head2 account_statement( %parameter )
@@ -721,24 +787,24 @@ Navigates to the html page which contains the account statement. The content is 
 by the agent, parsed by parse_account_overview and returned as an array of hashes.
 Like:
 @VAR =( {
-          'Buchungstag' => '18.11.2003',
-          'Wert' => '18.11.2003',
+          'Buchungstag' => '18.02.2005',
+          'Wert' => '18.02.2005',
           'Verwendungszweck' => 'this is for you',
           'Haben' => '40,00',
           'Soll' => '',
-          'Währung' => 'EUR'
+          'Waehrung' => 'EUR'
         },
         {
-          'Buchungstag' => '19.11.2003',
-          'Wert' => '19.11.2003',
+          'Buchungstag' => '19.02.2005',
+          'Wert' => '19.02.2003',
           'Verwendungszweck' => 'this was mine',
           'Haben'  => '',
           'Soll' => '-123.98',
-          'Währung' => 'EUR'
+          'Waehrung' => 'EUR'
         }) ;
 
 Keys are in german because they are retrieved directly from the header of the
-HTML tables.
+csv file which is downloaded from the server.
 
 You can pass a hash to this method to tell the period you would like to
 get the statement for. If you don't pass a parameter then you'll receive
@@ -747,12 +813,25 @@ Parameter to pass to the function:
 
 my %parameter = (
                         period => 1,
-                        StartDate => "10.10.2003",
-                        EndDate => "29.11.2003",
+                        StartDate => "10.02.2005",
+                        EndDate => "28.02.2005",
                 );
 
-If period is set to 1 then StartDate and EndDate will be used otherwise
-since last login at the banks server is used. StartDate and EndDate have to
+If period is set to 1 then StartDate and EndDate will be used.
+
+The second possibilty is to get an account overview for the last n days.
+
+my %parameter = (
+                        last => 10,
+                );
+
+This will retrieve an overview for the last ten days.
+The bank server allows 10,20,30,60,90 days. If you specify any other
+value then the method account_statement will use one of the above values
+( the next biggest one ).
+
+If neither period nor last is defined last login date at the bank
+server is used. StartDate and EndDate have to
 be in german format.
 
 =head2 transfer( %parameter )
@@ -769,12 +848,14 @@ This method transfers money to the specified account passed to the function.
                 );
 $account->transfer( %parameter );
 
-It is possible to use up to 4 lines for Usage ( Usage[1-4] ). The length 
-in all fields is restricted and checked by the function.
+To be compatible to previous verion it possible to use up to 4 lines for Usage ( Usage[1-4] ).
+The banks server only knows about Usage1. The method transfer concatenates Usage[1-4] if
+available. The length in all fields is restricted and checked by the function.
 
 =head1 TODO:
 
-  * Add runtime tests to validate the HTML resp. responses from the server
+  * Allthough more checks have been implemented to validate the HTML resp. responses from the server
+it might be that some are still missing. Please let me know your feedback.
 
 =head1 SEE ALSO
 
@@ -786,7 +867,7 @@ Wolfgang Schlueschen, E<lt>wschl@cpan.orgE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2003 by Wolfgang Schlueschen
+Copyright 2003, 2004, 2005 by Wolfgang Schlueschen
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.

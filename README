@@ -1,4 +1,4 @@
-Finance/Bank/DE/DeutscheBank version 0.01
+Finance/Bank/DE/DeutscheBank version 0.02
 =========================================
 
 This is a module faciliating access to the german
@@ -21,6 +21,7 @@ This module requires these other modules and libraries:
   WWW::Mechanize
   HTML::TreeBuilder
   HTML::LinkExtractor
+  Text::CSV_XS
   an SSL module for LWP
 
 
@@ -28,4 +29,4 @@ COPYRIGHT AND LICENCE
 
 This module may be used under the same terms as Perl itself.
 
-Copyright (C) 2003 Wolfgang Schlueschen <wschl@cpan.org>
+Copyright (C) 2003, 2004, 2005 Wolfgang Schlueschen <wschl@cpan.org>

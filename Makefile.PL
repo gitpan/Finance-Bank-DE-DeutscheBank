@@ -9,6 +9,7 @@ WriteMakefile(
 				'WWW::Mechanize' => 0.35,
 				'HTML::TreeBuilder' => undef,
 				'HTML::LinkExtractor' => undef,
+				'Text::CSV_XS' => 0.23,
 				'Class::Accessor' => 0, 
 			}, # e.g., Module::Name => 1.1
 

@@ -1,4 +1,8 @@
 Revision history for Perl extension Finance::Bank::DE::DeutscheBank.
 
+0.02 Mon Feb 28 11:17:04 2005
+  - changes for new html layout applied
+  - more error checking
+
 0.01 Wed Dec  3 21:14:37 2003
   - first version derived from Finance::Bank::Postbank_de and others

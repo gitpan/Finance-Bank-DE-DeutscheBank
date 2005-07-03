@@ -1,5 +1,12 @@
 Revision history for Perl extension Finance::Bank::DE::DeutscheBank.
 
+0.03 Sun Jul 03 20:16:03 2005
+  - changes due to warnings caused by missing onclick attribute
+    thanks to Thomas George and Sven Erbe
+  - white spaces are already handled by as_trimmed_text
+    thanks to Thomas George
+  - warnings are turned on/off locally now
+
 0.02 Mon Feb 28 11:17:04 2005
   - changes for new html layout applied
   - more error checking

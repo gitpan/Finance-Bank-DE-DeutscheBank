@@ -1,4 +1,4 @@
-Finance/Bank/DE/DeutscheBank version 0.02
+Finance/Bank/DE/DeutscheBank version 0.03
 =========================================
 
 This is a module faciliating access to the german
@@ -22,7 +22,7 @@ This module requires these other modules and libraries:
   HTML::TreeBuilder
   HTML::LinkExtractor
   Text::CSV_XS
-  an SSL module for LWP
+  a SSL module for LWP
 
 
 COPYRIGHT AND LICENCE

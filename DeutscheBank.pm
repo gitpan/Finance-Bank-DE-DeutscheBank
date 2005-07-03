@@ -11,7 +11,7 @@ use Text::CSV_XS;
 
 use vars qw[ $VERSION ];
 
-$VERSION = '0.02';
+$VERSION = '0.03';
 
 BEGIN	{
 		Finance::Bank::DE::DeutscheBank->mk_accessors(qw( agent ));
@@ -101,7 +101,7 @@ sub new_session
 		$agent->current_form->value('SubAccount',$self->{subaccount});
 		$agent->current_form->value('PIN',$self->{password});
 
-		$^W=0;
+		local $^W=0;
 		$agent->current_form->value('appName', 'Netscape');
 		$agent->current_form->value('appVersion', '4.78 (Linux 2.4.19-4GB i686; U)');
 		$agent->current_form->value('platform', 'Linux');
@@ -122,7 +122,7 @@ sub new_session
 		$LinkExtractor->parse(\$agent->content());
 
 		# needed here because of empty links ( href attribute )
-		$^W=1;
+		local $^W=1;
 
 		# now we have the links in the format
 		#	{
@@ -169,15 +169,11 @@ sub new_session
 
 		# get links for additional functions / broken links ( onclick )
 		my $navigator =  $agent->find_link( text_regex => qr/Ihre Finanzübersicht als PDF-Datei speichern/ );
-		$navigator->[5]{ 'onclick' } =~ s!^[^/]+/!/!;
-		$navigator->[5]{ 'onclick' } =~ s!';.*;!!;
 		push @tmp, {	'_TEXT'	=> 'Ihre Finanzübersicht als PDF-Datei speichern',
 				'href'	=> $navigator->[5]{ 'onclick' }
 			   };
 
 		$navigator =  $agent->find_link( text_regex => qr/Ihre Finanzübersicht als CSV-Datei speichern/ );
-		$navigator->[5]{ 'onclick' } =~ s!^[^/]+/!/!;
-		$navigator->[5]{ 'onclick' } =~ s!';.*;!!;
 		push @tmp, {	'_TEXT'	=> 'Ihre Finanzübersicht als CSV-Datei speichern',
 				'href'	=> $navigator->[5]{ 'onclick' }
 			   };
@@ -283,9 +279,9 @@ sub close_session
 	if (not $self->access_denied)
 	{
 		$self->log("Closing session");
-		$^W=0;
+		local $^W=0;
 		$self->select_function('Kunden-Logout');
-		$^W=1;
+		local $^W=1;
 		$result = $self->agent->res->as_string =~ /https:\/\/wob.deutsche-bank.de\/trxm\/logout\/pbc\/logout_pbc.html/;
 	}
 	else
@@ -331,9 +327,6 @@ sub parse_account_overview
 				if (( defined $child->attr('class')) && (( $child->attr('class') eq 'total balance')||($child->attr('class') eq 'total currency')))
 				{
 					my $tmp = $child->as_trimmed_text;
-					$tmp =~ s/^[ 	]*//g;
-					$tmp =~ s/[ 	]*$//g;
-					$tmp =~ s/\240//g;
 
 					if ( $child->attr('class') eq 'total balance')
 					{
@@ -359,9 +352,9 @@ sub saldo
 	my $agent = $self->agent;
 	if ($agent)
 	{
-		$^W=0;
+		local $^W=0;
 		$self->select_function('Übersicht');
-		$^W=1;
+		local $^W=1;
 
 		return $self->parse_account_overview();
 	}
@@ -383,12 +376,12 @@ sub account_statement
 	my $agent = $self->agent;
 	if ($agent)
 	{
-		$^W=0;
+		local $^W=0;
 		$self->select_function('Übersicht');
 
 		my %account = $self->parse_account_overview();
 		$agent->follow_link( 'text' => 'Umsatzanzeige' );
-		$^W=1;
+		local $^W=1;
 
 		my $tree = HTML::TreeBuilder->new();
 
@@ -469,13 +462,13 @@ sub account_statement
 			;
 		}
 
-		$^W=0;
+		local $^W=0;
 		# VALIDATION_TRIGGER_1 is used to trigger update of account balance
 		my $result = $agent->click('VALIDATION_TRIGGER1' ); 
 
 		# VALIDATION_TRIGGER_5 is used to get CSV formated data of account balance
 		$result = $agent->click('VALIDATION_TRIGGER_5' ); 
-		$^W=1;
+		local $^W=1;
 
 		#successfully downloaded account balance data in csv format
 		if ( $result->is_success )
@@ -540,9 +533,9 @@ sub transfer
 	my $agent = $self->agent;
 	if ($agent)
 	{
-		$^W=0;
+		local $^W=0;
 		$self->select_function('Inlands-Überweisung');
-		$^W=1;
+		local $^W=1;
 
 		croak "Receiver name must be defined"
 			unless ( defined $parameter{ 'Receiver' } );
@@ -620,10 +613,10 @@ sub transfer
 		$agent->current_form->value('Amount',		$parameter{ 'Amount' });
 		$agent->current_form->value('Usage',		$parameter{ 'Usage1' });
 
-		$^W=0;
+		local $^W=0;
 		# VALIDATION_TRIGGER is used to trigger 'transfer'
 		my $result = $agent->click('VALIDATION_TRIGGER' ); 
-		$^W=1;
+		local $^W=1;
 
 		croak "An error occured during submitting data"
 			unless ( ! $self->error_page );
@@ -636,10 +629,10 @@ sub transfer
 
 		$agent->current_form->value('mCk',		$parameter{ 'Tan' });
 
-		$^W=0;
+		local $^W=0;
 		# VALIDATION_TRIGGER is used to trigger 'transfer'
 		$result = $agent->click('VALIDATION_TRIGGER_1' ); 
-		$^W=1;
+		local $^W=1;
 
 		if ( $self->error_page )
 		{ 

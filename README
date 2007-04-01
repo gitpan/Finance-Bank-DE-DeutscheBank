@@ -1,4 +1,4 @@
-Finance/Bank/DE/DeutscheBank version 0.03
+Finance/Bank/DE/DeutscheBank version 0.04
 =========================================
 
 This is a module faciliating access to the german
@@ -29,4 +29,4 @@ COPYRIGHT AND LICENCE
 
 This module may be used under the same terms as Perl itself.
 
-Copyright (C) 2003, 2004, 2005 Wolfgang Schlueschen <wschl@cpan.org>
+Copyright (C) 2003, 2004, 2005, 2006, 2007 Wolfgang Schlueschen <wschl@cpan.org>

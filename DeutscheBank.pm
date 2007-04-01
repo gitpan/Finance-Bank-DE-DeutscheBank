@@ -11,7 +11,7 @@ use Text::CSV_XS;
 
 use vars qw[ $VERSION ];
 
-$VERSION = '0.03';
+$VERSION = '0.04';
 
 BEGIN	{
 		Finance::Bank::DE::DeutscheBank->mk_accessors(qw( agent ));
@@ -860,7 +860,7 @@ Wolfgang Schlueschen, E<lt>wschl@cpan.orgE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2003, 2004, 2005 by Wolfgang Schlueschen
+Copyright 2003, 2004, 2005, 2006, 2007 by Wolfgang Schlueschen
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.

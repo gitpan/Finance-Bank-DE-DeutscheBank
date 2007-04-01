@@ -1,5 +1,11 @@
 Revision history for Perl extension Finance::Bank::DE::DeutscheBank.
 
+0.04 Sun Apr 01 15:59:48 2007
+  - changes due to modified weblayout of Deutsche Bank
+    ( key words for total balance were changed )
+  - should now be possible to return balances for subaccounts
+    ( untested due to lack of existing subaccounts )
+
 0.03 Sun Jul 03 20:16:03 2005
   - changes due to warnings caused by missing onclick attribute
     thanks to Thomas George and Sven Erbe

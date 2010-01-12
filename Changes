@@ -1,5 +1,14 @@
 Revision history for Perl extension Finance::Bank::DE::DeutscheBank.
 
+0.05 Tue Jan 12 19:41:17 CET 2010
+  - changes due to modified weblayout of Deutsche Bank
+  - to not get into problems with German Umlauts the english version of Deutsche Bank page is used
+  - translations into German are done where necessary
+  - error in manual page corrected Waehrung -> Währung
+  - sub function transfer removed from documentation and Perl coder
+    ( iTANs are interactive anyway; if there is a need to implement this feature please let me know )
+  - updated requirements for required Perl modules to reflect the development environment
+
 0.04 Sun Apr 01 15:59:48 2007
   - changes due to modified weblayout of Deutsche Bank
     ( key words for total balance were changed )

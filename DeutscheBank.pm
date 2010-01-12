@@ -9,17 +9,19 @@ use HTML::LinkExtractor;
 use HTML::TreeBuilder;
 use Text::CSV_XS;
 
+
 use vars qw[ $VERSION ];
 
-$VERSION = '0.04';
+$VERSION = '0.05';
 
 BEGIN	{
 		Finance::Bank::DE::DeutscheBank->mk_accessors(qw( agent ));
 	};
 
 use constant BASEURL	=> 'https://meine.deutsche-bank.de';
-use constant LOGIN	=> BASEURL . '/mod/WebObjects/dbpbc.woa';
-use constant FUNCTIONS	=> "(Übersicht)|(Ihr Konto)|(Ihr Depot)|(Service / Optionen)|(Umsatzanzeige)|(Inlands-Überweisung)|(Daueraufträge)|(Lastschrift)|(Kunden-Logout)|(Überweisungsvorlagen)(Ihre Finanzübersicht als PDF-Datei speichern)|(Ihre Finanzübersicht als CSV-Datei speichern)";
+use constant LOGIN	=> BASEURL . '/trxm/db/set.locale.do?locale=en';
+use constant FUNCTIONS	=> "(Ãœbersicht)|(Ihr Konto)|(Ihr Depot)|(Service / Optionen)|(Umsatzanzeige)|(Inlands-Ãœberweisung)|(DauerauftrÃ¤ge)|(Lastschrift)|(Kunden-Logout)|(Ãœberweisungsvorlagen)|(Ihre FinanzÃ¼bersicht als PDF-Datei speichern)|(Ihre FinanzÃ¼bersicht als CSV-Datei speichern)|(Customer-Logout)|(Overview)|(Your account)|(Your sec. account)|(Service / Options)|(Transactions)|(Domestic transfer order)|(Standing orders)|(Direct debit)|(Transfer order templates)|(Customer-Logout)|(Save as PDF File)|(Save as CSV File)|(Save your financial overview as PDF file)|(Save your financial overview as CSV file)";
+
 
 sub new
 {
@@ -96,18 +98,20 @@ sub new_session
 		my $function = 'ACCOUNTBALANCE';
 		$self->log("Logging into function $function");
 
-		$agent->current_form->value('AccountNumber',$self->{account});
-		$agent->current_form->value('Branch',$self->{branch});
-		$agent->current_form->value('SubAccount',$self->{subaccount});
-		$agent->current_form->value('PIN',$self->{password});
+		# gvo=DisplayFinancialOverview&loginTab=iTAN&javascriptEnabled=true&branch=XXX&account=XXXXXX&subaccount=XX&pin=XXXXX&quickLink=DisplayFinancialOverview
+		$agent->current_form->value('gvo','DisplayFinancialOverview');
+		$agent->current_form->value('loginTab','iTAN');
+		$agent->current_form->value('javascriptEnabled','false');
+		$agent->current_form->value('quickLink','DisplayFinancialOverview');
+		$agent->current_form->value('account',$self->{account});
+		$agent->current_form->value('branch',$self->{branch});
+		$agent->current_form->value('subaccount',$self->{subaccount});
+		$agent->current_form->value('pin',$self->{password});
+		$agent->add_header('Accept-Charset' => 'utf-8');
+		$agent->add_header('Accept-Encoding' => '');
 
 		local $^W=0;
-		$agent->current_form->value('appName', 'Netscape');
-		$agent->current_form->value('appVersion', '4.78 (Linux 2.4.19-4GB i686; U)');
-		$agent->current_form->value('platform', 'Linux');
-
-		# VALIDATION_TRIGGER_1 is used to trigger 'LOGIN'
-		$result = $agent->click('VALIDATION_TRIGGER_1' );
+		$result = $agent->submit();
 
 		if ( $self->access_denied )
 		{
@@ -126,7 +130,7 @@ sub new_session
 
 		# now we have the links in the format
 		#	{
-		#		'_TEXT' => 'Übersicht',
+		#		'_TEXT' => 'Overview',
 		#		'target' => '_top',
 		#		'href' => '/mod/WebObjects/dbpbc.woa/618/wo/HpRl1hqezkxfYRosJRjTg0/4.11.1.5.3.3.5.3',
 		#		'tag' => 'a',
@@ -139,12 +143,12 @@ sub new_session
 
 		# but I would like to have them as
 		# 	{
-		# 		'_TEXT' => 'Übersicht',
+		# 		'_TEXT' => 'Overview',
 		# 		'href' => '/mod/WebObjects/dbpbc.woa/618/wo/HpRl1hqezkxfYRosJRjTg0/4.11.1.5.3.3.5.3',
 		# 	},
 		# 	{	...
 		#	}
-		# and only for supported functions ( not all links and images ... )
+		# and only for functions ( not all links and images ... )
 
 		my @tmp = ();
 		foreach my $elem ( @{$LinkExtractor->links} )
@@ -156,27 +160,12 @@ sub new_session
 					if ( $_ !~ m/(_TEXT)|(href)/ )
 					{
 						delete $elem->{ $_ };
-					} 
+					}
 				}
 
-				# get all but broken links
-				if ( $elem->{ '_TEXT' } !~ m/Ihre Finanzübersicht als [CP][SD][VF]-Datei speichern/ )
-				{
-					push @tmp, \%$elem;
-				}
+				push @tmp, \%$elem;
 			}
 		}
-
-		# get links for additional functions / broken links ( onclick )
-		my $navigator =  $agent->find_link( text_regex => qr/Ihre Finanzübersicht als PDF-Datei speichern/ );
-		push @tmp, {	'_TEXT'	=> 'Ihre Finanzübersicht als PDF-Datei speichern',
-				'href'	=> $navigator->[5]{ 'onclick' }
-			   };
-
-		$navigator =  $agent->find_link( text_regex => qr/Ihre Finanzübersicht als CSV-Datei speichern/ );
-		push @tmp, {	'_TEXT'	=> 'Ihre Finanzübersicht als CSV-Datei speichern',
-				'href'	=> $navigator->[5]{ 'onclick' }
-			   };
 
 		# save these links so that we can remember them
 		$self->{navigation} = \@tmp;
@@ -191,7 +180,7 @@ sub get_login_page
 {
 	my ($self,$url) = @_;
 	$self->log("Connecting to $url");
-	$self->agent(WWW::Mechanize->new(agent => "Mozilla/4.78 (Linux 2.4.19-4GB i686; U) Opera 6.03 [en]"));
+	$self->agent(WWW::Mechanize->new(agent => "Mozilla/4.78 (Linux 2.4.19-4GB i686; U) Opera 6.03 [en]",  cookie_jar => {} ));
 
 	my $agent = $self->agent();
 	$agent->get(LOGIN);
@@ -200,35 +189,51 @@ sub get_login_page
 };
 
 
-sub error_page {
-  # Check if an error page is shown (a page with much red on it)
-  my ($self) = @_;
-  $self->agent->content =~ /<tr valign="top" bgcolor="#FF0033">/sm || $self->agent->content =~ /<div class="errorMsg">/ || $self->agent->content =~ /<div class="backendErrorMsg">/ ;
+sub error_page
+{
+	# Check if an error page is shown (a page with much red on it)
+	my ($self) = @_;
+	my $content = $self->agent->content;
+	$content =~ s!<div class="errorMsg"><label for="">Bitte beachten Sie, da\&szlig; die "Hochstell-Taste" \(Capslock\) aktiv ist.</label></div>!!;
+	$content =~ s!<div class="errorMsg"><label for="">Please note capslock-key is active.</label></div>!!;
+	$content =~ /<tr valign="top" bgcolor="#FF0033">/sm || $content =~ /<div class="errorMsg">/ || $content =~ /<div class="backendErrorMsg">/ ;
 };
+
 
 sub maintenance
 {
 	my ($self) = @_;
+
+	# would be nice if someone could mail me the actual english and german messages which are displayed in case of maintenance ...
 	$self->error_page or
 	$self->agent->content =~ /derzeit steht das Internet Banking aufgrund von Wartungsarbeiten leider nicht zur Verf&uuml;gung.\s*<br>\s*In K&uuml;rze wird das Internet Banking wieder wie gewohnt erreichbar sein./gsm;
 };
 
-sub access_denied {
-  my ($self) = @_;
-  my $content = $self->agent->content;
 
-  $self->error_page or
-  (  $content =~ /Die eingegebene Kontonummer ist unvollst&auml;ndig oder falsch\..*\(2051\)/gsm
-  or $content =~ /Die eingegebene PIN ist falsch\. Bitte geben Sie die richtige PIN ein\.\s*\(10011\)/gsm
-  or $content =~ /Die von Ihnen eingegebene Kontonummer ist ung&uuml;ltig und entspricht keiner Deutsche Bank-Kontonummer.\s*\(3040\)/gsm
-  or $content =~ /Leider konnte Ihre Anmeldung nicht erfolgreich durchgef&uuml;hrt werden/
-  or $content =~ /Bitte geben Sie ein g&uuml;ltiges Datum ein/ );
+sub access_denied
+{
+	my ($self) = @_;
+	my $content = $self->agent->content;
+
+	$self->error_page or
+	(  $content =~ /Die eingegebene Kontonummer ist unvollst&auml;ndig oder falsch\..*\(2051\)/gsm
+		or $content =~ /Die eingegebene PIN ist falsch\. Bitte geben Sie die richtige PIN ein\.\s*\(10011\)/gsm
+		or $content =~ /Die von Ihnen eingegebene Kontonummer ist ung&uuml;ltig und entspricht keiner Deutsche Bank-Kontonummer.\s*\(3040\)/gsm
+		or $content =~ /Leider konnte Ihre Anmeldung nicht erfolgreich durchgef&uuml;hrt werden/
+		or $content =~ /Unfortunately, you were not able to register successfully./
+		or $content =~ /Bitte Ã¼berpr&uuml;fen Sie Ihre Anmeldedaten oder versuchen Sie es zu einem sp&auml;teren Zeitpunkt noch einmal./
+		or $content =~ /Please check your registration data or try again later./
+		or $content =~ /Bitte geben Sie ein g&uuml;ltiges Datum ein/
+	);
 };
 
-sub session_timed_out {
-  my ($self) = @_;
-  $self->agent->content =~ /Die Sitzungsdaten sind ung&uuml;ltig, bitte f&uuml;hren Sie einen erneuten Login durch.\s+\(27000\)/;
+
+sub session_timed_out
+{
+	my ($self) = @_;
+	$self->agent->content =~ /Die Sitzungsdaten sind ung&uuml;ltig, bitte f&uuml;hren Sie einen erneuten Login durch.\s+\(27000\)/;
 };
+
 
 sub functions
 {
@@ -252,6 +257,7 @@ sub functions
 	}
 }
 
+
 sub select_function
 {
 	my ($self,$function) = @_;
@@ -259,8 +265,8 @@ sub select_function
 		unless $self->functions($function);
 
 	$self->new_session unless $self->agent;
-
 	$self->agent->get( $self->functions( "$function" ) );
+
 	if ( $self->session_timed_out )
 	{
 		$self->log("Session timed out");
@@ -272,6 +278,7 @@ sub select_function
 	$self->agent->status;
 };
 
+
 sub close_session
 {
 	my ($self) = @_;
@@ -280,9 +287,9 @@ sub close_session
 	{
 		$self->log("Closing session");
 		local $^W=0;
-		$self->select_function('Kunden-Logout');
+		$self->select_function('Customer-Logout');
 		local $^W=1;
-		$result = $self->agent->res->as_string =~ /https:\/\/wob.deutsche-bank.de\/trxm\/logout\/pbc\/logout_pbc.html/;
+		$result = $self->agent->res->as_string =~ /https:\/\/meine.deutsche-bank.de\/trxm\/db\/.*;link=trxm_en_logout-pbcde-to-txm_login.*/;
 	}
 	else
 	{
@@ -303,7 +310,7 @@ sub login
 	}
 	else
 	{
-		return 0; 
+		return 0;
 	}
 
 };
@@ -324,23 +331,32 @@ sub parse_account_overview
 		{
 			foreach my $child ( $row->look_down('_tag', 'td') )
 			{
-				if (( defined $child->attr('class')) && (( $child->attr('class') eq 'total balance')||($child->attr('class') eq 'total currency')))
+				if (( defined $child->attr('class')) && ( $child->attr('class') eq 'balance'))
 				{
 					my $tmp = $child->as_trimmed_text;
 
-					if ( $child->attr('class') eq 'total balance')
+					if ( $child->attr('class') eq 'balance')
 					{
+						if ( $tmp =~ m/\.[0-9][0-9]$/ )
+						{
+							$tmp =~ s/\./#/;
+							$tmp =~ s/,/./g;
+							$tmp =~ s/#/,/;
+						}
 						$saldo{ 'Saldo' }  = $tmp;
 					}
-					elsif ($child->attr('class') eq 'total currency')
+				}
+
+				foreach my $morechildren ( $child->look_down('_tag', 'acronym') )
+				{
+					if (( defined $morechildren->attr('title')) && ( $morechildren->attr('title') eq 'Euro'))
 					{
-						$saldo{ 'Währung' } = $tmp;
+						$saldo{ 'WÃ¤hrung' } = $morechildren->as_trimmed_text;
 					}
 				}
 			}
 		}
-	} 
-
+	}
 	return %saldo
 }
 
@@ -348,14 +364,12 @@ sub parse_account_overview
 sub saldo
 {
 	my ($self) = @_;
-
 	my $agent = $self->agent;
 	if ($agent)
 	{
 		local $^W=0;
-		$self->select_function('Übersicht');
+		$self->select_function('Overview');
 		local $^W=1;
-
 		return $self->parse_account_overview();
 	}
 	else
@@ -363,6 +377,37 @@ sub saldo
 		return undef;
 	}
 };
+
+
+sub MapData
+{
+	my ( @data ) = @_;
+	for my $row ( @data )
+	{
+		foreach $_ ( keys %$row  )
+		{
+			if (( $_ eq 'Haben' )||( $_ eq 'Soll' ))
+			{
+				$row->{ $_ }  =~ s/\./#/;
+				$row->{ $_ }  =~ s/,/./g;
+				$row->{ $_ } =~ s/#/,/;
+			}
+			elsif (( $_ eq 'Buchungstag' )||( $_ eq 'Wert' ))
+			{
+				my @tmp = split( /\//, $row->{ $_ } );
+				$row->{ $_ }  = join( '.', $tmp[1], $tmp[0], $tmp[2] );
+			}
+			elsif ( $_ eq 'Waehrung' )
+			{
+				my $tmp = $row->{ 'Waehrung' };
+				delete $row->{ 'Waehrung' };
+				$row->{ 'WÃ¤hrung' } = $tmp;
+			}
+		}
+	}
+	return @data;
+}
+
 
 sub account_statement
 {
@@ -377,25 +422,11 @@ sub account_statement
 	if ($agent)
 	{
 		local $^W=0;
-		$self->select_function('Übersicht');
+		$self->select_function('Overview');
 
 		my %account = $self->parse_account_overview();
-		$agent->follow_link( 'text' => 'Umsatzanzeige' );
+		$agent->follow_link( 'text' => 'Transactions' );
 		local $^W=1;
-
-		my $tree = HTML::TreeBuilder->new();
-
-		$tree->parse( $agent->content );
-
-		my $LinkFixed = ();
-
-		foreach my $selectelem ( $tree->look_down('_tag', 'select') )
-		{
-			if (( defined $selectelem->attr('onchange') ) && ( $selectelem->attr('onchange') eq 'document.calForm.time[1].click();' ))
-			{
-				$LinkFixed = $selectelem->attr('name');
-			}
-		}
 
 		# should I get account statement for user defined period ?
 		if ( defined $parameter{ 'period' } )
@@ -409,10 +440,10 @@ sub account_statement
 			croak "Year must have 4 digits in StartDate"
 				unless ( length $year == 4 );
 
-			$agent->current_form->value( 'time','period');
-			$agent->current_form->value( 'fromDatecal_0', $day );
-			$agent->current_form->value( 'fromDatecal_1', $month );
-			$agent->current_form->value( 'fromDatecal_2', $year );
+			$agent->current_form->value( 'period','dynamicRange');
+			$agent->current_form->value( 'periodStartDay', $day );
+			$agent->current_form->value( 'periodStartMonth', $month );
+			$agent->current_form->value( 'periodStartYear', $year );
 
 			( $day, $month, $year ) = split( '\.', $parameter{ 'EndDate' } );
 			$day	= sprintf("%02d", $day );
@@ -420,42 +451,46 @@ sub account_statement
 			$year	= sprintf("%04d", $year );
 
 			croak "Year must have 4 digits in EndDate"
-				unless ( length $year == 4 );
+				unless (( length $year == 4 )&&( $year > 1900 ));
 
-			$agent->current_form->value( 'time','period');
-			$agent->current_form->value( 'toDatecal_0', $day );
-			$agent->current_form->value( 'toDatecal_1', $month );
-			$agent->current_form->value( 'toDatecal_2', $year );
+			$agent->current_form->value( 'period','dynamicRange');
+			$agent->current_form->value( 'periodEndDay', $day );
+			$agent->current_form->value( 'periodEndMonth', $month );
+			$agent->current_form->value( 'periodEndYear', $year );
 		}
 		elsif ( defined $parameter{ 'last' } )
 		{
 			my $last = ();
-			$agent->current_form->value('time','fixed');
+			$agent->current_form->value('period','fixedRange');
 			if ( $parameter{ 'last' } <= 10 )
 			{
-				$last = 0;
+				$last = 10;
 			}
 			elsif ( $parameter{ 'last' } <= 20 )
 			{
-				$last = 1;
+				$last = 20;
 			}
 			elsif ( $parameter{ 'last' } <= 30 )
 			{
-				$last = 2;
+				$last = 30;
 			}
 			elsif ( $parameter{ 'last' } <= 60 )
 			{
-				$last = 3;
+				$last = 60;
 			}
 			elsif ( $parameter{ 'last' } <= 90 )
 			{
-				$last = 4;
+				$last = 90;
 			}
-			else	# > 90
+			elsif ( $parameter{ 'last' } <= 120 )
 			{
-				$last = 5;
+				$last = 120;
 			}
-			$agent->current_form->value($LinkFixed, $last);
+			else	# > 120
+			{
+				$last = 180;
+			}
+			$agent->select('periodDays', $last);
 		}
 		else	#expect that per default last login date is set ...
 		{
@@ -463,11 +498,11 @@ sub account_statement
 		}
 
 		local $^W=0;
-		# VALIDATION_TRIGGER_1 is used to trigger update of account balance
-		my $result = $agent->click('VALIDATION_TRIGGER1' ); 
+		# 'refresh view' is used to trigger update of account balance
+		my $result = $agent->submit();
 
-		# VALIDATION_TRIGGER_5 is used to get CSV formated data of account balance
-		$result = $agent->click('VALIDATION_TRIGGER_5' ); 
+		# download CSV formated data of account balances
+		$result = $agent->follow_link( text_regex => qr/Save your account turnover as.*CSV.*file/ );
 		local $^W=1;
 
 		#successfully downloaded account balance data in csv format
@@ -482,6 +517,14 @@ sub account_statement
 				my $line = $balance[ $loop ];
 				chomp( $line );
 
+				$line =~ s/^Booking date;/Buchungstag;/;
+				$line =~ s/;Value date;/;Wert;/;
+				$line =~ s/;Transactions Payment details;/;Verwendungszweck;/;
+				$line =~ s/;Debit;/;Soll;/;
+				$line =~ s/;Credit;/;Haben;/;
+				$line =~ s/;Currency/;Waehrung/;
+				$line =~ s/^Balance;/Kontostand;/;
+
 				if ( $StartLineDetected == 1 )
 				{
 					my $status = $csv->parse( $line );
@@ -492,25 +535,30 @@ sub account_statement
 				}
 				elsif ( $StartLineDetected == 2 )
 				{
-					if ( $line !~ /^Kontostand "/ )
+					if ( $line !~ /^Kontostand;/ )
 					{
 						my $status = $csv->parse( $line );
 						my @columns = $csv->fields();
 
-						for (my $loop = 0; $loop < scalar @columns; $loop++ ) 
-						{ 
+						for (my $loop = 0; $loop < scalar @columns; $loop++ )
+						{
 							$AccountStatement[ $AccountRow ]{ $header[ $loop ] } = $columns[ $loop ];
 						}
-						$AccountRow++; 
+						$AccountRow++;
 					}
 				}
-				elsif ( $line =~ /Vorgemerkte und noch nicht gebuchte Umsätze sind nicht Bestandteil dieser Aufstellung/ )
+				elsif (	( $line =~ /Vorgemerkte und noch nicht gebuchte UmsÃ¤tze sind nicht Bestandteil dieser Aufstellung/ )||
+					( $line =~ /Transactions pending are not included in this report/ ) )
 				{
 					$StartLineDetected = 1;
 				}
 			}
-		} 
-		return @AccountStatement;
+			return MapData( @AccountStatement );
+		}
+		else
+		{
+			return undef;
+		}
 	}
 	else
 	{
@@ -518,137 +566,6 @@ sub account_statement
 	}
 }
 
-
-sub transfer
-{
-	my ($self, %parameter) = @_;
-
-	my $count = 0;
-	my @header = ();
-	my @Entries = ();
-	my @AccountStatement = ();
-	my $AccountRow = ();
-	my %SingleRemittance = ();
-
-	my $agent = $self->agent;
-	if ($agent)
-	{
-		local $^W=0;
-		$self->select_function('Inlands-Überweisung');
-		local $^W=1;
-
-		croak "Receiver name must be defined"
-			unless ( defined $parameter{ 'Receiver' } );
-
-		croak "Receiver name must not exceed 27 digits"
-			unless (( length $parameter{ 'Receiver' } <= 27 )&&( length $parameter{ 'Receiver' } >= 1 ));
-
-		croak "Receiver account number must be defined"
-			unless ( defined $parameter{ 'RecAccount' } );
-
-		croak "Receiver account number must not exceed 10 digits"
-			unless (( length $parameter{ 'RecAccount' } <= 10 )&&( length $parameter{ 'RecAccount' } >= 1 ));
-
-		croak "Receiver bank number (BLZ) must be defined"
-			unless ( defined $parameter{ 'RecBLZ' } );
-
-		croak "Receiver bank number (BLZ) must not exceed 10 digits"
-			unless (( length $parameter{ 'RecBLZ' } <= 10 )&&( length $parameter{ 'RecBLZ' } >= 1 ));
-
-		croak "Transfer amount must be defined"
-			unless ( defined $parameter{ 'Amount' } );
-
-		croak "Transfer amount must not exceed 14 digits"
-			unless (( length $parameter{ 'Amount' } <= 14 )&&( length $parameter{ 'Amount' } >= 1 ));
-
-		croak "Usage1 (Vermerk) must be defined"
-			unless ( defined $parameter{ 'Usage1' } );
-
-		$parameter{ 'Usage2' } = $parameter{ 'Usage2' } || "";
-		$parameter{ 'Usage3' } = $parameter{ 'Usage3' } || "";
-		$parameter{ 'Usage4' } = $parameter{ 'Usage4' } || "";
-
-		$parameter{ 'Usage1' } .= " " . $parameter{ 'Usage2' };
-		$parameter{ 'Usage1' } .= " " . $parameter{ 'Usage3' };
-		$parameter{ 'Usage1' } .= " " . $parameter{ 'Usage4' };
-
-		croak "Usage (Vermerk) must not exceed 108 characters"
-			unless (( length $parameter{ 'Usage1' } <= 108 )&&( length $parameter{ 'Usage1' } >= 1 ));
-		
-		my $tree = HTML::TreeBuilder->new();
-		$tree->parse( $agent->content() );
-		foreach my $inputelem ( $tree->look_down('_tag', 'input') )
-		{
-			if (( defined $inputelem->attr('class') ) && ( $inputelem->attr('class') =~ m/(^calDD$)|(^calMM$)|(^calYYYY$)/ ))
-			{
-				$SingleRemittance{ $inputelem->attr('class') } = $inputelem->attr('name');
-			}
-		}
-
-		# check if this remittance should be executed on a specific date
-		if ( defined $parameter{ 'Date' } )
-		{
-			my ( $day, $month, $year ) = split( '\.', $parameter{ 'Date' } );
-			$day	= sprintf("%02d", $day );
-			$month	= sprintf("%02d", $month );
-			$year	= sprintf("%04d", $year );
-
-			croak "Year must have 4 digits in Date"
-				unless ( length $year == 4 );
-
-			$agent->current_form->value( $SingleRemittance{  'calDD'  }, $day );
-			$agent->current_form->value( $SingleRemittance{  'calMM'  }, $month );
-			$agent->current_form->value( $SingleRemittance{ 'calYYYY' }, $year );
-		}
-		else
-		{
-			# no specific date; do it as soon as possible
-			;
-		}
-
-
-		$agent->current_form->value('Receiver',		$parameter{ 'Receiver' });
-		$agent->current_form->value('RecAccount',	$parameter{ 'RecAccount' });
-		$agent->current_form->value('RecBLZ',		$parameter{ 'RecBLZ' });
-		$agent->current_form->value('Amount',		$parameter{ 'Amount' });
-		$agent->current_form->value('Usage',		$parameter{ 'Usage1' });
-
-		local $^W=0;
-		# VALIDATION_TRIGGER is used to trigger 'transfer'
-		my $result = $agent->click('VALIDATION_TRIGGER' ); 
-		local $^W=1;
-
-		croak "An error occured during submitting data"
-			unless ( ! $self->error_page );
-
-		croak "Tan must be defined"
-			unless ( defined $parameter{ 'Tan' } );
-
-		croak "Tan must have 6 digits"
-			unless ( length $parameter{ 'Tan' } == 6 );
-
-		$agent->current_form->value('mCk',		$parameter{ 'Tan' });
-
-		local $^W=0;
-		# VALIDATION_TRIGGER is used to trigger 'transfer'
-		$result = $agent->click('VALIDATION_TRIGGER_1' ); 
-		local $^W=1;
-
-		if ( $self->error_page )
-		{ 
-			carp "an error occured during tan submision";
-			return 0;
-		}
-		else
-		{
-			return 1;
-		}
-	}
-	else
-	{
-		return undef;
-	}
-}
 
 1;
 __END__
@@ -688,7 +605,7 @@ Finance::Bank::DE::DeutscheBank - Checks your Deutsche Bank account from Perl
   }
 
   my %saldo = $account->saldo();
-  print("The amount of money you have is: $saldo{ 'Saldo' } $saldo{ 'Währung' }\n");
+  print("The amount of money you have is: $saldo{ 'Saldo' } $saldo{ 'WÃ¤hrung' }\n");
 
   # get account statement
   my %parameter = (
@@ -771,8 +688,8 @@ content of the current page from there.
 
 =head2 select_function( STRING )
 
-Selects a function. The three currently supported functions are C<Inlands-Überweisung>, C<Übersicht> and C<Kunden-Logout>.
-Which means transfer, account statement and quit.
+Selects a function. The two currently supported functions are C<Ãœbersicht> and C<Kunden-Logout>.
+Which means account statement and quit.
 
 =head2 account_statement( %parameter )
 
@@ -785,7 +702,7 @@ Like:
           'Verwendungszweck' => 'this is for you',
           'Haben' => '40,00',
           'Soll' => '',
-          'Waehrung' => 'EUR'
+          'WÃ¤hrung' => 'EUR'
         },
         {
           'Buchungstag' => '19.02.2005',
@@ -793,7 +710,7 @@ Like:
           'Verwendungszweck' => 'this was mine',
           'Haben'  => '',
           'Soll' => '-123.98',
-          'Waehrung' => 'EUR'
+          'WÃ¤hrung' => 'EUR'
         }) ;
 
 Keys are in german because they are retrieved directly from the header of the
@@ -827,23 +744,6 @@ If neither period nor last is defined last login date at the bank
 server is used. StartDate and EndDate have to
 be in german format.
 
-=head2 transfer( %parameter )
-
-This method transfers money to the specified account passed to the function.
-
-%parameter =    (
-                        Receiver        => 'Wolfgang Schlüschen',
-                        RecAccount      => '1234567890',
-                        RecBLZ          => '20080000',
-                        Amount          => '1,00',
-                        Usage1          => 'Programming',
-                        Tan             => '123456',
-                );
-$account->transfer( %parameter );
-
-To be compatible to previous verion it possible to use up to 4 lines for Usage ( Usage[1-4] ).
-The banks server only knows about Usage1. The method transfer concatenates Usage[1-4] if
-available. The length in all fields is restricted and checked by the function.
 
 =head1 TODO:
 
@@ -860,7 +760,7 @@ Wolfgang Schlueschen, E<lt>wschl@cpan.orgE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2003, 2004, 2005, 2006, 2007 by Wolfgang Schlueschen
+Copyright 2003 - 2010 by Wolfgang Schlueschen
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.

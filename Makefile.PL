@@ -6,11 +6,11 @@ WriteMakefile(
     'NAME'		=> 'Finance::Bank::DE::DeutscheBank',
     'VERSION_FROM'	=> 'DeutscheBank.pm', # finds $VERSION
     'PREREQ_PM'		=> {
-				'WWW::Mechanize' => 0.35,
-				'HTML::TreeBuilder' => undef,
-				'HTML::LinkExtractor' => undef,
-				'Text::CSV_XS' => 0.23,
-				'Class::Accessor' => 0, 
+				'WWW::Mechanize' => 1.52,
+				'HTML::TreeBuilder' => 3.23,
+				'HTML::LinkExtractor' => 0.13,
+				'Text::CSV_XS' => 0.29,
+				'Class::Accessor' => 0.31, 
 			}, # e.g., Module::Name => 1.1
 
     ($] >= 5.005 ?    ## Add these new keywords supported since 5.005

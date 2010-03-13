@@ -12,14 +12,14 @@ use Text::CSV_XS;
 
 use vars qw[ $VERSION ];
 
-$VERSION = '0.05';
+$VERSION = '0.06';
 
 BEGIN	{
 		Finance::Bank::DE::DeutscheBank->mk_accessors(qw( agent ));
 	};
 
 use constant BASEURL	=> 'https://meine.deutsche-bank.de';
-use constant LOGIN	=> BASEURL . '/trxm/db/set.locale.do?locale=en';
+use constant LOGIN	=> BASEURL . '/trxm/db/';
 use constant FUNCTIONS	=> "(Übersicht)|(Ihr Konto)|(Ihr Depot)|(Service / Optionen)|(Umsatzanzeige)|(Inlands-Überweisung)|(Daueraufträge)|(Lastschrift)|(Kunden-Logout)|(Überweisungsvorlagen)|(Ihre Finanzübersicht als PDF-Datei speichern)|(Ihre Finanzübersicht als CSV-Datei speichern)|(Customer-Logout)|(Overview)|(Your account)|(Your sec. account)|(Service / Options)|(Transactions)|(Domestic transfer order)|(Standing orders)|(Direct debit)|(Transfer order templates)|(Customer-Logout)|(Save as PDF File)|(Save as CSV File)|(Save your financial overview as PDF file)|(Save your financial overview as CSV file)";
 
 
@@ -183,6 +183,7 @@ sub get_login_page
 	$self->agent(WWW::Mechanize->new(agent => "Mozilla/4.78 (Linux 2.4.19-4GB i686; U) Opera 6.03 [en]",  cookie_jar => {} ));
 
 	my $agent = $self->agent();
+	$agent->add_header('Accept-Language' => 'en-us,en;q=0.5');
 	$agent->get(LOGIN);
 	$self->log_httpresult();
 	$agent->status;
@@ -523,7 +524,7 @@ sub account_statement
 				$line =~ s/;Debit;/;Soll;/;
 				$line =~ s/;Credit;/;Haben;/;
 				$line =~ s/;Currency/;Waehrung/;
-				$line =~ s/^Balance;/Kontostand;/;
+				$line =~ s/^Account balance;/Kontostand;/;
 
 				if ( $StartLineDetected == 1 )
 				{

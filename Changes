@@ -1,5 +1,9 @@
 Revision history for Perl extension Finance::Bank::DE::DeutscheBank.
 
+0.06 Sat Mar 13 18:50:19 CET 2010
+  - changes due to modified weblayout of Deutsche Bank
+  - switching to en/en-us does not work via GET parameter any more; now done via ACCEPT-LANGUAGE http header
+
 0.05 Tue Jan 12 19:41:17 CET 2010
   - changes due to modified weblayout of Deutsche Bank
   - to not get into problems with German Umlauts the english version of Deutsche Bank page is used
